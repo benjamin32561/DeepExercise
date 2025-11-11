@@ -205,3 +205,60 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ============================================
+# Project-specific ignores
+# ============================================
+
+# Dataset files (large files, don't commit to git)
+0data/lfw2/
+0data/*.zip
+0data/*.tgz
+0data/*.tar.gz
+lfwa.zip
+
+# Keep the split files but ignore the images
+!0data/train.txt
+!0data/test.txt
+!0data/.gitkeep
+
+# Generated figures and visualizations
+figures/*.png
+figures/*.jpg
+figures/*.pdf
+
+# Model checkpoints and weights
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+*.h5
+*.pkl
+
+# Training logs and outputs
+logs/
+runs/
+wandb/
+tensorboard/
+*.log
+
+# Experiment results
+results/
+experiments/
+outputs/
+
+# Temporary analysis files
+temp/
+tmp/
+scratch/
+
+# Jupyter notebook outputs
+*.ipynb
+.ipynb_checkpoints/
+
+# MacOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
