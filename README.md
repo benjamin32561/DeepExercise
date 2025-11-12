@@ -1,144 +1,159 @@
 # Facial Recognition Using One-Shot Learning
 
-This project implements a Siamese Neural Network for facial recognition using one-shot learning, based on the paper ["Siamese Neural Networks for One-shot Image Recognition"](https://www.cs.toronto.edu/~rsalakhu/papers/oneshot1.pdf).
+Siamese Neural Network implementation for facial recognition based on [Koch et al. (2015)](https://www.cs.cmu.edu/~rsalakhu/papers/oneshot1.pdf).
 
-## Project Goal
+## Dataset
 
-Implement a one-shot classification solution that can successfully determine whether two facial images of previously unseen persons belong to the same person, using the Labeled Faces in the Wild (LFW-a) dataset.
+**LFW-a (Labeled Faces in the Wild)**
+- Train: 788 people, 4,441 images, 1,100 pairs
+- Test: 353 people, 1,939 images, 500 pairs
+- No person overlap between train/test
 
-## Project Structure
+## Model Architecture
 
-```
-DeepExercise/
-├── 0data/                       # Dataset directory
-│   ├── lfw2/                    # LFW-a images organized by person
-│   ├── train.txt                # Training pairs
-│   └── test.txt                 # Testing pairs
-├── utils/                       # Utility modules
-│   ├── __init__.py
-│   └── dataset_loader.py        # Memory-efficient dataset loader
-├── figures/                     # Generated visualizations
-│   ├── dataset_analysis.png
-│   └── detailed_distribution.png
-├── visualize_dataset.py         # Dataset analysis and visualization
-├── analyze_dataset.py           # Dataset statistics script
-├── DATASET_SUMMARY.md           # Detailed dataset information
-└── README.md                    # This file
-```
+**Siamese CNN with 38.9M parameters:**
+- Conv Block 1: 64 filters, 10×10, ReLU, MaxPool
+- Conv Block 2: 128 filters, 7×7, ReLU, MaxPool
+- Conv Block 3: 128 filters, 4×4, ReLU, MaxPool
+- Conv Block 4: 256 filters, 4×4, ReLU
+- FC Layer: 9,216 → 4,096, Sigmoid
+- L1 Distance + FC → Similarity score
 
-## Setup
+**Key Features:**
+- Batch normalization for stability
+- Data augmentation (affine, flip, color jitter)
+- Adam optimizer (LR=0.0001)
+- Binary Cross Entropy loss
+- Early stopping + LR scheduling
 
-### Requirements
+## Quick Start
+
+### 1. Install Dependencies
 
 ```bash
-# Create conda environment (or clone existing one)
-conda create --name de_env python=3.10
 conda activate de_env
-
-# Install dependencies
-pip install numpy matplotlib seaborn pillow torch torchvision
+pip install torch torchvision numpy matplotlib seaborn scikit-learn pillow tqdm
 ```
 
-### Download Dataset
+### 2. Train with Hyperparameter Search
 
-1. Download LFW-a dataset from [Google Drive](https://drive.google.com/file/d/1p1wjaqpTh_5RHfJu4vUh8JJCdKwYMHCp/view)
-2. Extract to `0data/` directory
-3. Download train/test splits:
-   - [train.txt](https://drive.google.com/file/d/1Ie-8ihDHfS_FmxAq4EMtMZ-PpMdezQB8/view)
-   - [test.txt](https://drive.google.com/file/d/11r_8bbGap1skrEzrQtQOu8ZztG6UVisX/view)
+```bash
+python train.py
+```
 
-## Usage
+**What it does:**
+- Runs 10 experiments with random hyperparameter search
+- **Parallel training**: 2 models train simultaneously on GPU (2x faster!)
+- Tests different: learning rates, batch sizes, optimizers, weight decay, etc.
+- Automatically selects best model based on validation accuracy
+- **~2-3 hours on GPU** for all experiments (with parallel training)
 
-### Visualize Dataset
+**Outputs:**
+- `experiments_TIMESTAMP/` - All experiment results
+  - `exp_001/`, `exp_002/`, ... - Individual experiments
+  - `summary.json` - All results ranked by performance
+  - `comparison.png` - Hyperparameter analysis plots
+- `checkpoints/best_model.pth` - Best model (auto-selected)
+
+### 3. Evaluate
+
+```bash
+python evaluate.py
+```
+
+**Outputs in `results/`:**
+- ROC curve + AUC
+- Confusion matrix
+- Score distributions
+- Example predictions
+
+### 4. Visualize Dataset
 
 ```bash
 python visualize_dataset.py
 ```
 
-This will generate comprehensive visualizations in the `figures/` directory showing:
-- Dataset size comparisons
-- Distribution of images per person
-- Cumulative distributions
-- Statistics summary
+## Project Structure
 
-### Dataset Loader
-
-The `LFWDatasetLoader` class provides memory-efficient access to the dataset:
-
-```python
-from utils.dataset_loader import LFWDatasetLoader
-
-# Load train dataset
-train_loader = LFWDatasetLoader(
-    data_dir="/path/to/0data/lfw2",
-    split_file="/path/to/0data/train.txt"
-)
-
-# Get statistics
-stats = train_loader.get_statistics()
-
-# Generate random pairs for training
-pairs = train_loader.generate_pairs(num_pairs=100, balanced=True)
-
-# Access specific pair from split file
-img1_path, img2_path = train_loader.get_pair_by_index(0)
+```
+DeepExercise/
+├── 0data/                  # Dataset
+│   ├── lfw2/              # Images (gitignored)
+│   ├── train.txt          # Train pairs
+│   └── test.txt           # Test pairs
+├── models/
+│   └── siamese_network.py # Model architecture
+├── utils/
+│   ├── dataset_loader.py  # Memory-efficient loader
+│   └── dataset.py         # PyTorch datasets
+├── train.py               # Training script
+├── evaluate.py            # Evaluation script
+└── visualize_dataset.py   # Dataset analysis
 ```
 
-## Implementation Plan
+## Hyperparameter Search Space
 
-### Phase 1: Data Preparation ✅
-- [x] Download and organize LFW-a dataset
-- [x] Parse train/test split files
-- [x] Create memory-efficient dataset loader
-- [x] Analyze dataset statistics
-- [x] Generate visualizations
+The training script automatically searches over:
 
-### Phase 2: Model Architecture (Next)
-- [ ] Implement Siamese network architecture
-- [ ] Design convolutional layers based on paper
-- [ ] Implement distance metric (L1/L2)
-- [ ] Create loss function (contrastive/triplet loss)
+| Parameter | Search Range | Type |
+|-----------|--------------|------|
+| Learning Rate | **1e-4 to 5e-3** | Log-uniform |
+| Batch Size | [64, 128, 256] | Choice |
+| Weight Decay | 1e-5 to 1e-3 | Log-uniform |
+| Optimizer | [Adam, SGD] | Choice |
+| Pairs/Epoch | **[2K, 4K, 6K]** | Choice |
+| Batch Norm | [True, False] | Choice |
 
-### Phase 3: Training Pipeline
-- [ ] Implement data augmentation
-- [ ] Create pair generation strategy
-- [ ] Set up training loop
-- [ ] Implement validation
-- [ ] Add checkpointing and logging
+**Fixed Parameters:**
+- Loss: Binary Cross Entropy
+- Distance: L1 (Manhattan)
+- Augmentation: Affine + Color Jitter + Flip
+- Early Stopping: 10 epochs patience
+- LR Scheduling: ReduceLROnPlateau
 
-### Phase 4: Evaluation
-- [ ] Implement evaluation metrics (accuracy, precision, recall)
-- [ ] Generate ROC curves
-- [ ] Analyze misclassifications
-- [ ] Compare with baseline
+## Expected Performance
 
-### Phase 5: Experimentation
-- [ ] Hyperparameter tuning
-- [ ] Architecture variations
-- [ ] Different distance metrics
-- [ ] Data augmentation strategies
+- **Accuracy:** 85-95%
+- **AUC:** 0.90-0.95
+- **Training Time:** 2-4 hours (GPU)
+- **Convergence:** 20-30 epochs
 
-### Phase 6: Reporting
-- [ ] Document experimental setup
-- [ ] Record convergence times and final metrics
-- [ ] Generate training/validation curves
-- [ ] Analyze successful and failed predictions
-- [ ] Write final report
+## Usage Examples
 
-## Key Features
+### Adjust Parallel Training
 
-1. **Memory Efficient**: Dataset loader stores only file paths, not images
-2. **No Data Leakage**: Strict train/test split with no person overlap
-3. **Balanced Pairs**: Support for generating balanced same/different person pairs
-4. **Comprehensive Analysis**: Detailed statistics and visualizations
-5. **Reproducible**: Fixed random seeds and documented parameters
+Edit in `train.py`:
+```python
+n_experiments = 10  # Number of experiments
+n_parallel = 2      # Run 2 at once (increase if you have more GPU memory)
+                    # 3-4 parallel for 24GB+ GPU
+```
+
+### Modify Search Space
+
+Edit `search_space` dict in `train.py`:
+```python
+search_space = {
+    'learning_rate': {'type': 'loguniform', 'low': 1e-5, 'high': 1e-3},
+    'batch_size': {'type': 'choice', 'values': [64, 128, 256]},
+    # Add or modify parameters
+}
+```
+
+### Get Embeddings
+
+```python
+from models.siamese_network import SiameseNetwork
+import torch
+
+model = SiameseNetwork(input_channels=3, use_batchnorm=True)
+checkpoint = torch.load('checkpoints/best_model.pth')
+model.load_state_dict(checkpoint['model_state_dict'])
+
+embedding = model.get_embedding(image)  # Returns 4096-dim vector
+```
 
 ## References
 
-- Koch, G., Zemel, R., & Salakhutdinov, R. (2015). Siamese Neural Networks for One-shot Image Recognition. ICML Deep Learning Workshop.
-- Huang, G. B., Ramesh, M., Berg, T., & Learned-Miller, E. (2007). Labeled Faces in the Wild: A Database for Studying Face Recognition in Unconstrained Environments.
-
-## License
-
-This is an educational project for learning purposes.
-
+- Koch et al. (2015) - [Siamese Neural Networks for One-shot Image Recognition](https://www.cs.cmu.edu/~rsalakhu/papers/oneshot1.pdf)
+- Huang et al. (2007) - Labeled Faces in the Wild Database

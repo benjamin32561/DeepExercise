@@ -245,6 +245,7 @@ tensorboard/
 # Experiment results
 results/
 experiments/
+experiments_*/
 outputs/
 
 # Temporary analysis files
