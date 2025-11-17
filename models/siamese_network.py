@@ -74,6 +74,7 @@ class SiameseNetwork(nn.Module):
     def _initialize_weights(self):
         """
         Initialize weights using He initialization for ReLU activations.
+        Xavier initialization for sigmoid output layer.
         This is important for deep networks to prevent vanishing/exploding gradients.
         """
         for m in self.modules():
@@ -82,8 +83,13 @@ class SiameseNetwork(nn.Module):
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.Linear):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                nn.init.constant_(m.bias, 0)
+                # Use Xavier for final sigmoid layer, He for others
+                if m is self.fc_out:
+                    nn.init.xavier_normal_(m.weight)
+                    nn.init.constant_(m.bias, 0)
+                else:
+                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                    nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.BatchNorm1d):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
