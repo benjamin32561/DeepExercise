@@ -144,7 +144,22 @@ class SiameseNetwork(nn.Module):
         
         return x
     
-    def forward(self, input1, input2):
+    def get_embeddings(self, input1, input2):
+        """
+        Get embeddings for both inputs (for use with embedding-based losses).
+        
+        Args:
+            input1: First image tensor
+            input2: Second image tensor
+            
+        Returns:
+            embedding1, embedding2: Tuple of embedding tensors
+        """
+        embedding1 = self.forward_once(input1)
+        embedding2 = self.forward_once(input2)
+        return embedding1, embedding2
+    
+    def forward(self, input1, input2, return_embeddings=False):
         """
         Forward pass through the Siamese network.
         Processes both images through shared weights and computes similarity.
@@ -152,13 +167,18 @@ class SiameseNetwork(nn.Module):
         Args:
             input1: First image tensor (batch, channels, height, width)
             input2: Second image tensor (batch, channels, height, width)
+            return_embeddings: If True, return embeddings instead of similarity scores
             
         Returns:
-            Similarity score between 0 and 1 (batch, 1)
+            If return_embeddings=False: Similarity score between 0 and 1 (batch, 1)
+            If return_embeddings=True: (embedding1, embedding2)
         """
         # Get embeddings for both images using shared weights
         output1 = self.forward_once(input1)
         output2 = self.forward_once(input2)
+        
+        if return_embeddings:
+            return output1, output2
         
         # Compute L1 distance between embeddings
         # Paper: p = sigmoid(sum(alpha_j * |h1_j - h2_j|))
@@ -184,58 +204,6 @@ class SiameseNetwork(nn.Module):
             Feature embedding (batch, 4096)
         """
         return self.forward_once(x)
-
-
-class ContrastiveLoss(nn.Module):
-    """
-    Contrastive Loss function for Siamese Networks.
-    
-    Loss = (1 - Y) * 0.5 * D^2 + Y * 0.5 * max(margin - D, 0)^2
-    
-    Where:
-    - Y = 1 if pair is dissimilar, 0 if similar
-    - D = distance between embeddings
-    - margin = minimum distance for dissimilar pairs
-    
-    Reasoning:
-    - Pulls similar pairs closer (minimize distance)
-    - Pushes dissimilar pairs apart (maximize distance up to margin)
-    - Margin prevents the network from pushing dissimilar pairs infinitely far
-    """
-    
-    def __init__(self, margin=1.0):
-        """
-        Initialize Contrastive Loss.
-        
-        Args:
-            margin: Minimum distance for dissimilar pairs
-        """
-        super(ContrastiveLoss, self).__init__()
-        self.margin = margin
-    
-    def forward(self, output1, output2, label):
-        """
-        Compute contrastive loss.
-        
-        Args:
-            output1: Embedding from first image (batch, embedding_dim)
-            output2: Embedding from second image (batch, embedding_dim)
-            label: 0 if same person, 1 if different person (batch,)
-            
-        Returns:
-            Loss value
-        """
-        # Euclidean distance
-        euclidean_distance = F.pairwise_distance(output1, output2)
-        
-        # Contrastive loss
-        loss = torch.mean(
-            (1 - label) * torch.pow(euclidean_distance, 2) +
-            label * torch.pow(torch.clamp(self.margin - euclidean_distance, min=0.0), 2)
-        )
-        
-        return loss
-
 
 def count_parameters(model):
     """Count the number of trainable parameters in the model."""

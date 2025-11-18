@@ -77,18 +77,18 @@ def plot_bar(ax, datasets, values, colors, ylabel, title, value_format='{:,}'):
 
 def plot_grouped_bar(ax, datasets, group1, group2, colors, ylabel, title, labels):
     """Helper to create grouped bar chart."""
-    x = np.arange(len(datasets))
-    width = 0.35
-    
+x = np.arange(len(datasets))
+width = 0.35
+
     bars1 = ax.bar(x - width/2, group1, width, label=labels[0], 
                    color=colors[0], alpha=0.8, edgecolor='black', linewidth=1.5)
     bars2 = ax.bar(x + width/2, group2, width, label=labels[1], 
                    color=colors[1], alpha=0.8, edgecolor='black', linewidth=1.5)
-    
+
     ax.set_ylabel(ylabel, fontsize=12, fontweight='bold')
     ax.set_title(title, fontsize=13, fontweight='bold')
-    ax.set_xticks(x)
-    ax.set_xticklabels(datasets)
+ax.set_xticks(x)
+ax.set_xticklabels(datasets)
     ax.legend(fontsize=10)
     ax.grid(axis='y', alpha=0.3, linestyle='--')
     return bars1, bars2
@@ -98,33 +98,33 @@ def plot_grouped_bar(ax, datasets, group1, group2, colors, ylabel, title, labels
 
 def create_summary_table(ax, all_stats, total_pairs, total_positive, total_negative):
     """Helper to create summary statistics table."""
-    ax.axis('off')
-    
-    table_data = [
+ax.axis('off')
+
+table_data = [
         ['Metric', 'Train', 'Val', 'Test', 'Combined'],
         ['Total Pairs'] + [f"{s['num_pairs']:,}" for s in all_stats] + [f"{total_pairs:,}"],
         ['Positive'] + [f"{s['num_positive']:,}" for s in all_stats] + [f"{total_positive:,}"],
         ['Negative'] + [f"{s['num_negative']:,}" for s in all_stats] + [f"{total_negative:,}"],
         ['Unique People'] + [f"{s['num_unique_people']:,}" for s in all_stats] + ['-'],
         ['Unique Images'] + [f"{s['num_unique_images']:,}" for s in all_stats] + ['-'],
-    ]
-    
-    table = ax.table(cellText=table_data, cellLoc='center', loc='center',
+]
+
+table = ax.table(cellText=table_data, cellLoc='center', loc='center',
                      colWidths=[0.25, 0.15, 0.15, 0.15, 0.15])
-    table.auto_set_font_size(False)
+table.auto_set_font_size(False)
     table.set_fontsize(10)
-    table.scale(1, 2)
-    
+table.scale(1, 2)
+
     # Style header
     for i in range(5):
         table[(0, i)].set_facecolor('#34495e')
-        table[(0, i)].set_text_props(weight='bold', color='white')
-    
+    table[(0, i)].set_text_props(weight='bold', color='white')
+
     # Style first column
     for i in range(1, 6):
         table[(i, 0)].set_facecolor('#ecf0f1')
         table[(i, 0)].set_text_props(weight='bold')
-    
+
     ax.set_title('Dataset Statistics Summary', fontsize=13, fontweight='bold', pad=20)
 
 
@@ -229,7 +229,7 @@ def visualize_datasets(datasets_dir: str, output_dir: str):
     
     plt.suptitle('Dataset Statistics: Train / Val / Test', 
                  fontsize=18, fontweight='bold', y=0.995)
-    plt.tight_layout()
+plt.tight_layout()
     
     # Save figure
     output_file = output_path / 'dataset_statistics.png'

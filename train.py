@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.optim import SGD, Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from pathlib import Path
@@ -10,15 +11,22 @@ from tqdm import tqdm
 import kornia.augmentation as K
 
 from models.siamese_network import SiameseNetwork
+from models.face_verification_net import FaceVerificationNet, FaceVerificationNetLight
+from models.backbone_network import BackboneNetwork, BackboneNetworkWithClassifier
+from utils.losses import ContrastiveLoss, BCEFromEmbeddings, FocalLoss, CosineEmbeddingLoss
 from utils.dataloader import create_dataloaders
 
 
-def train_epoch(model, train_loader, optimizer, criterion, device, augmentation=None):
-    """Train for one epoch."""
+def train_epoch(model, train_loader, optimizer, criterion, device, augmentation=None, loss_type='bce'):
+    """Train for one epoch with universal loss support."""
     model.train()
     total_loss = 0.0
     correct = 0
     total = 0
+    
+    # Determine if loss needs embeddings or scores
+    embedding_losses = ['contrastive', 'cosine']
+    score_losses = ['bce', 'focal']
     
     pbar = tqdm(train_loader, desc="  Training", leave=False, ncols=100)
     
@@ -26,7 +34,7 @@ def train_epoch(model, train_loader, optimizer, criterion, device, augmentation=
         # Move to device
         img1 = img1.to(device, non_blocking=True)
         img2 = img2.to(device, non_blocking=True)
-        labels = labels.float().unsqueeze(1).to(device, non_blocking=True)
+        labels_orig = labels.float().to(device, non_blocking=True)
         
         # Apply augmentation on GPU
         if augmentation is not None:
@@ -35,18 +43,57 @@ def train_epoch(model, train_loader, optimizer, criterion, device, augmentation=
         
         # Forward
         optimizer.zero_grad()
-        outputs = model(img1, img2)
-        loss = criterion(outputs, labels)
+        
+        # Get model outputs based on what loss needs
+        if loss_type in embedding_losses:
+            # Loss needs embeddings
+            if hasattr(model, 'get_embeddings'):
+                embedding1, embedding2 = model.get_embeddings(img1, img2)
+            else:
+                # Model outputs embeddings by default (custom/backbone)
+                outputs = model(img1, img2)
+                if isinstance(outputs, tuple):
+                    embedding1, embedding2 = outputs
+                else:
+                    # Shouldn't happen but handle gracefully
+                    raise ValueError(f"Model doesn't output embeddings for {loss_type} loss")
+            
+            # Compute loss
+            loss = criterion(embedding1, embedding2, labels_orig)
+            
+            # Calculate accuracy based on distance
+            distances = torch.norm(embedding1 - embedding2, p=2, dim=1)
+            predictions = (distances < 1.0).float()
+            correct += (predictions == labels_orig).sum().item()
+            
+        else:  # score_losses
+            # Loss needs similarity scores
+            outputs = model(img1, img2)
+            if isinstance(outputs, tuple):
+                # Model outputs embeddings, but we need scores
+                # This shouldn't happen with proper config, but handle it
+                embedding1, embedding2 = outputs
+                distances = torch.norm(embedding1 - embedding2, p=2, dim=1)
+                outputs = torch.sigmoid(-distances + 1.0).unsqueeze(1)
+            
+            labels_bce = labels_orig.unsqueeze(1) if labels_orig.dim() == 1 else labels_orig
+            loss = criterion(outputs, labels_bce)
+            
+            # Calculate accuracy based on threshold
+            predictions = (outputs > 0.5).float()
+            correct += (predictions == labels_bce).sum().item()
         
         # Backward
         loss.backward()
+        
+        # Gradient clipping for stability
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        
         optimizer.step()
         
         # Metrics
         total_loss += loss.item() * img1.size(0)
-        predictions = (outputs > 0.5).float()
-        correct += (predictions == labels).sum().item()
-        total += labels.size(0)
+        total += labels_orig.size(0)
         
         # Update progress bar
         pbar.set_postfix({
@@ -60,12 +107,16 @@ def train_epoch(model, train_loader, optimizer, criterion, device, augmentation=
     return epoch_loss, epoch_acc
 
 
-def validate(model, val_loader, criterion, device):
-    """Validate the model."""
+def validate(model, val_loader, criterion, device, loss_type='bce'):
+    """Validate the model with universal loss support."""
     model.eval()
     total_loss = 0.0
     correct = 0
     total = 0
+    
+    # Determine if loss needs embeddings or scores
+    embedding_losses = ['contrastive', 'cosine']
+    score_losses = ['bce', 'focal']
     
     pbar = tqdm(val_loader, desc="  Validation", leave=False, ncols=100)
     
@@ -74,17 +125,47 @@ def validate(model, val_loader, criterion, device):
             # Move to device
             img1 = img1.to(device, non_blocking=True)
             img2 = img2.to(device, non_blocking=True)
-            labels = labels.float().unsqueeze(1).to(device, non_blocking=True)
+            labels_orig = labels.float().to(device, non_blocking=True)
             
-            # Forward
-            outputs = model(img1, img2)
-            loss = criterion(outputs, labels)
+            # Get model outputs based on what loss needs
+            if loss_type in embedding_losses:
+                # Loss needs embeddings
+                if hasattr(model, 'get_embeddings'):
+                    embedding1, embedding2 = model.get_embeddings(img1, img2)
+                else:
+                    outputs = model(img1, img2)
+                    if isinstance(outputs, tuple):
+                        embedding1, embedding2 = outputs
+                    else:
+                        raise ValueError(f"Model doesn't output embeddings for {loss_type} loss")
+                
+                # Compute loss
+                loss = criterion(embedding1, embedding2, labels_orig)
+                
+                # Calculate accuracy based on distance
+                distances = torch.norm(embedding1 - embedding2, p=2, dim=1)
+                predictions = (distances < 1.0).float()
+                correct += (predictions == labels_orig).sum().item()
+                
+            else:  # score_losses
+                # Loss needs similarity scores
+                outputs = model(img1, img2)
+                if isinstance(outputs, tuple):
+                    # Model outputs embeddings, convert to scores
+                    embedding1, embedding2 = outputs
+                    distances = torch.norm(embedding1 - embedding2, p=2, dim=1)
+                    outputs = torch.sigmoid(-distances + 1.0).unsqueeze(1)
+                
+                labels_bce = labels_orig.unsqueeze(1) if labels_orig.dim() == 1 else labels_orig
+                loss = criterion(outputs, labels_bce)
+                
+                # Calculate accuracy based on threshold
+                predictions = (outputs > 0.5).float()
+                correct += (predictions == labels_bce).sum().item()
             
             # Metrics
             total_loss += loss.item() * img1.size(0)
-            predictions = (outputs > 0.5).float()
-            correct += (predictions == labels).sum().item()
-            total += labels.size(0)
+            total += labels_orig.size(0)
             
             # Update progress bar
             pbar.set_postfix({
@@ -160,32 +241,50 @@ def main():
         # Paths
         'train_dataset': '0data/datasets/train_dataset.json',
         'val_dataset': '0data/datasets/val_dataset.json',
-        'output_dir': '0outputs/training',
+        'output_base_dir': '0outputs/experiments',  # Experiments will be organized here
         
-        # Model
-        'use_batchnorm': True,
+        # Model Architecture
+        # Options: 'siamese', 'custom', 'backbone'
+        'architecture': 'backbone',
+
+        # Loss Function
+        # Options: 'bce', 'focal' for siamese. 'contrastive', 'cosine' for other.
+        'loss': 'cosine',
+        
+        # Model-specific parameters
+        'use_batchnorm': True,      # For original model
+        'embedding_dim': 64,         
+        'dropout': 0.5,              
+        'pretrained': True,          # For backbone models
+        'backbone_name': 'mobilenet_v3_small',  # Smaller backbone (~2.5M params vs ResNet18's ~11M)
+        
+        # Loss-specific parameters
+        'contrastive_margin': 2.0,   # For contrastive loss
+        'focal_alpha': 0.25,         # For focal loss
+        'focal_gamma': 2.0,          # For focal loss
+        'cosine_margin': 0.5,        # For cosine embedding loss
         
         # Training
-        'batch_size': 64,
-        'num_epochs': 200,
-        'learning_rate': 1e-3,
-        'weight_decay': 1e-4,
-        'optimizer': 'sgd',
-        
-        # Augmentation
-        'use_augmentation': True,
-        'augmentations': [
-            K.RandomAffine(degrees=15, translate=(0.05, 0.05), scale=(0.93, 1.07), p=0.75),
-            K.RandomHorizontalFlip(p=0.75),
-            K.RandomGaussianNoise(mean=0.0, std=0.1, p=0.75),
-            K.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1, p=0.75),
-            K.RandomGaussianBlur(kernel_size=(3, 3), sigma=(0.1, 1.0), p=0.75),
-        ],
+        'learning_rate': 0.001,      # Lower LR for embedding-based learning
+        'batch_size': 64,            # REDUCED for small dataset (was 128)
+        'optimizer': 'adam',         # Adam is better for custom model
+        'momentum': 0.9,             # For SGD (if used)
+        'weight_decay': 5e-4,        # INCREASED regularization (was 1e-4)
         
         # Scheduling
-        'lr_patience': 10,
-        'lr_factor': 0.9,
-        'early_stopping_patience': 50,
+        'lr_factor': 0.5,            # More aggressive LR reduction
+        'lr_patience': 10,           # Reduced patience
+        'num_epochs': 200,
+        'early_stopping_patience': 100,  # REDUCED to stop earlier (was 200)
+        
+        # Augmentation (LIGHT for small dataset)
+        'use_augmentation': True,
+        'augmentations': [
+            K.RandomAffine(degrees=5, translate=(0.03, 0.03), scale=(0.95, 1.05), p=0.5),  # Reduced
+            K.RandomHorizontalFlip(p=0.5),
+            K.RandomGaussianNoise(mean=0.0, std=0.05, p=0.3),  # Reduced
+            K.RandomGaussianBlur(kernel_size=(3, 3), sigma=(0.1, 1.0), p=0.3),  # Reduced
+        ],
 
         # Data loading
         'num_workers': 16,
@@ -193,8 +292,24 @@ def main():
     
     # Setup
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    output_dir = Path(config['output_dir'])
+    
+    # Create experiment-specific directory
+    # Format: architecture_loss_optimizer_lr_bs
+    experiment_name = (
+        f"{config['architecture']}_"
+        f"{config['loss']}_"
+        f"{config['optimizer']}_"
+        f"lr{config['learning_rate']}_"
+        f"bs{config['batch_size']}"
+    )
+    output_dir = Path(config['output_base_dir']) / experiment_name
     output_dir.mkdir(parents=True, exist_ok=True)
+    
+    print("=" * 80)
+    print(f"EXPERIMENT: {experiment_name}")
+    print("=" * 80)
+    print(f"Output directory: {output_dir}")
+    print()
     
     # Enable cuDNN benchmark
     if torch.cuda.is_available():
@@ -242,18 +357,83 @@ def main():
     
     # Create model
     print("Creating model...")
-    model = SiameseNetwork(use_batchnorm=config['use_batchnorm']).to(device)
+    loss_type = config['loss']
+    
+    # Determine if we need embedding-based model
+    embedding_losses = ['contrastive', 'cosine']
+    need_embeddings = loss_type in embedding_losses
+    
+    if config['architecture'] == 'siamese':
+        # Original Siamese Network - works with all losses!
+        model = SiameseNetwork(use_batchnorm=config['use_batchnorm']).to(device)
+    
+    elif config['architecture'] == 'custom':
+        # Custom lightweight model - outputs embeddings
+        model = FaceVerificationNetLight(
+            embedding_dim=config['embedding_dim'],
+            dropout=config['dropout']
+        ).to(device)
+    
+    elif config['architecture'] == 'backbone':
+        # Pretrained backbone - works with both score and embedding losses
+        # Using MobileNetV3-Small for smaller model size (better for small datasets)
+        backbone_name = config.get('backbone_name', 'mobilenet_v3_small')
+        
+        if need_embeddings or loss_type in ['bce', 'focal']:
+            # For embedding losses OR if user wants embeddings with BCE
+            model = BackboneNetwork(
+                backbone=backbone_name,
+                embedding_dim=config['embedding_dim'],
+                pretrained=config['pretrained'],
+                dropout=config['dropout']
+            ).to(device)
+        else:
+            # Classifier version for score-based losses
+            model = BackboneNetworkWithClassifier(
+                backbone=backbone_name,
+                embedding_dim=config['embedding_dim'],
+                pretrained=config['pretrained'],
+                dropout=config['dropout']
+            ).to(device)
+    
+    else:
+        raise ValueError(f"Unknown architecture: {config['architecture']}. Choose from: 'siamese', 'custom', 'backbone'")
+    
+    print(f"Architecture: {config['architecture']}")
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     print()
     
-    # Setup training
-    criterion = nn.BCELoss()
+    # Setup loss
+    loss_type = config['loss']
+    print(f"Creating loss: {loss_type}")
+    
+    if loss_type == 'bce':
+        criterion = nn.BCELoss()
+        print(f"  Loss: Binary Cross-Entropy")
+    
+    elif loss_type == 'contrastive':
+        criterion = ContrastiveLoss(margin=config['contrastive_margin'])
+        print(f"  Loss: Contrastive (margin={config['contrastive_margin']})")
+    
+    elif loss_type == 'focal':
+        criterion = FocalLoss(alpha=config['focal_alpha'], gamma=config['focal_gamma'])
+        print(f"  Loss: Focal (alpha={config['focal_alpha']}, gamma={config['focal_gamma']})")
+    
+    elif loss_type == 'cosine':
+        criterion = CosineEmbeddingLoss(margin=config['cosine_margin'])
+        print(f"  Loss: Cosine Embedding (margin={config['cosine_margin']})")
+    
+    else:
+        raise ValueError(f"Unknown loss: {loss_type}. Choose from: 'bce', 'contrastive', 'focal', 'cosine'")
+    
+    print()
     
     if config['optimizer'].lower() == 'adam':
-        optimizer = Adam(model.parameters(), lr=config['learning_rate'], weight_decay=config['weight_decay'])
+        optimizer = Adam(model.parameters(), lr=config['learning_rate'], 
+                        weight_decay=config['weight_decay'])
     else:
         optimizer = SGD(model.parameters(), lr=config['learning_rate'], 
-                       weight_decay=config['weight_decay'], momentum=0.9)
+                       momentum=config['momentum'], weight_decay=config['weight_decay'])
     
     scheduler = ReduceLROnPlateau(
         optimizer, mode='min', factor=config['lr_factor'], 
@@ -291,8 +471,8 @@ def main():
         epoch_start = time.time()
         
         # Train and validate  
-        train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device, augmentation)
-        val_loss, val_acc = validate(model, val_loader, criterion, device)
+        train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device, augmentation, loss_type)
+        val_loss, val_acc = validate(model, val_loader, criterion, device, loss_type)
         
         # Learning rate
         current_lr = optimizer.param_groups[0]['lr']
@@ -333,9 +513,28 @@ def main():
                 'scheduler_state_dict': scheduler.state_dict(),
                 'val_acc': val_acc,
                 'val_loss': val_loss,
+                'config': config_to_save,
             }, output_dir / 'best_model.pth')
         else:
             epochs_without_improvement += 1
+        
+        # Save training curves and results after every epoch (in case of manual stop)
+        plot_training_curves(history, best_epoch, best_val_acc, output_dir)
+        
+        # Save intermediate results
+        intermediate_results = {
+            'best_val_acc': best_val_acc,
+            'best_val_loss': best_val_loss,
+            'best_epoch': best_epoch,
+            'total_epochs': len(history['train_loss']),
+            'current_epoch': epoch,
+            'final_train_acc': history['train_acc'][-1],
+            'final_train_loss': history['train_loss'][-1],
+            'history': history,
+            'config': config_to_save
+        }
+        with open(output_dir / 'results.json', 'w') as f:
+            json.dump(intermediate_results, f, indent=2)
         
         # Early stopping
         if epochs_without_improvement >= config['early_stopping_patience']:
