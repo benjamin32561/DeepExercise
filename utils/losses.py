@@ -86,6 +86,49 @@ class ContrastiveLoss(nn.Module):
         return loss
 
 
+class TripletLoss(nn.Module):
+    """
+    Triplet Loss for metric learning.
+    
+    Loss = max(d(anchor, positive) - d(anchor, negative) + margin, 0)
+    
+    Encourages:
+    - Small distance between anchor and positive
+    - Large distance between anchor and negative
+    - At least 'margin' separation between them
+    """
+    
+    def __init__(self, margin=1.0, normalize=True):
+        super(TripletLoss, self).__init__()
+        self.margin = margin
+        self.normalize = normalize
+    
+    def forward(self, anchor, positive, negative):
+        """
+        Args:
+            anchor: Anchor embeddings (batch_size, embedding_dim)
+            positive: Positive embeddings (batch_size, embedding_dim)
+            negative: Negative embeddings (batch_size, embedding_dim)
+        
+        Returns:
+            loss: Scalar triplet loss value
+        """
+        # Normalize embeddings to unit vectors
+        if self.normalize:
+            anchor = F.normalize(anchor, p=2, dim=1)
+            positive = F.normalize(positive, p=2, dim=1)
+            negative = F.normalize(negative, p=2, dim=1)
+        
+        # Calculate distances
+        pos_dist = F.pairwise_distance(anchor, positive, p=2)
+        neg_dist = F.pairwise_distance(anchor, negative, p=2)
+        
+        # Triplet loss: we want pos_dist < neg_dist by at least margin
+        losses = torch.relu(pos_dist - neg_dist + self.margin)
+        
+        return losses.mean()
+
+
 class FocalLoss(nn.Module):
     """
     Focal Loss for handling class imbalance.

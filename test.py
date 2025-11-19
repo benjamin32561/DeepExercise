@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from models.siamese_network import SiameseNetwork
+from models.siamese_v2 import SiameseNetV2
 from models.face_verification_net import FaceVerificationNet, FaceVerificationNetLight
 from models.backbone_network import BackboneNetwork, BackboneNetworkWithClassifier
 from utils.losses import ContrastiveLoss
@@ -17,7 +18,7 @@ from utils.dataloader import create_dataloaders
 # ============================================================================
 # HARDCODED PATHS - EDIT THESE
 # ============================================================================
-EXPERIMENT_DIR = '0outputs/experiments/siamese_bce_sgd_lr0.001_bs128'
+EXPERIMENT_DIR = '0outputs/experiments/siamese_focal_adam_lr0.001_bs64'
 TRAIN_DATASET_JSON = '0data/datasets/train_dataset.json'
 VAL_DATASET_JSON = '0data/datasets/val_dataset.json'
 TEST_DATASET_JSON = '0data/datasets/test_dataset.json'
@@ -44,6 +45,12 @@ def load_model(checkpoint_path, device):
     # Create model based on config
     if architecture in ['siamese', 'original']:
         model = SiameseNetwork(use_batchnorm=config.get('use_batchnorm', True))
+    elif architecture == 'siamese_v2':
+        model = SiameseNetV2(
+            conv_dropout=config.get('conv_dropout', 0.1),
+            fc_dropout=config.get('fc_dropout', 0.3),
+            use_se=config.get('use_se', True)
+        )
     elif architecture == 'custom':
         model = FaceVerificationNetLight(
             embedding_dim=config.get('embedding_dim', 128),
@@ -51,7 +58,7 @@ def load_model(checkpoint_path, device):
         )
     elif architecture == 'backbone':
         backbone_name = config.get('backbone_name', 'mobilenet_v3_small')
-        if loss_type in ['contrastive', 'cosine']:
+        if loss_type in ['contrastive', 'cosine', 'triplet']:
             model = BackboneNetwork(
                 backbone=backbone_name,
                 embedding_dim=config.get('embedding_dim', 128),
@@ -77,7 +84,7 @@ def load_model(checkpoint_path, device):
 
 def evaluate_dataset(model, dataloader, device, loss_type):
     """Evaluate model on a dataset."""
-    embedding_losses = ['contrastive', 'cosine']
+    embedding_losses = ['contrastive', 'cosine', 'triplet']
     use_embeddings = loss_type in embedding_losses
     
     all_predictions = []

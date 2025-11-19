@@ -11,9 +11,10 @@ from tqdm import tqdm
 import kornia.augmentation as K
 
 from models.siamese_network import SiameseNetwork
-from models.face_verification_net import FaceVerificationNet, FaceVerificationNetLight
+from models.siamese_v2 import SiameseNetV2
+from models.face_verification_net import FaceVerificationNet
 from models.backbone_network import BackboneNetwork, BackboneNetworkWithClassifier
-from utils.losses import ContrastiveLoss, BCEFromEmbeddings, FocalLoss, CosineEmbeddingLoss
+from utils.losses import ContrastiveLoss, FocalLoss, CosineEmbeddingLoss
 from utils.dataloader import create_dataloaders
 
 
@@ -40,6 +41,9 @@ def train_epoch(model, train_loader, optimizer, criterion, device, augmentation=
         if augmentation is not None:
             img1 = augmentation(img1)
             img2 = augmentation(img2)
+            # Clamp to valid range [0, 1] after augmentation
+            img1 = torch.clamp(img1, 0.0, 1.0)
+            img2 = torch.clamp(img2, 0.0, 1.0)
         
         # Forward
         optimizer.zero_grad()
@@ -244,25 +248,28 @@ def main():
         'output_base_dir': '0outputs/experiments',  # Experiments will be organized here
         
         # Model Architecture
-        # Options: 'siamese', 'custom', 'backbone'
-        'architecture': 'backbone',
+        # Options: 'siamese', 'siamese_v2', 'custom', 'backbone'
+        'architecture': 'siamese',
 
         # Loss Function
-        # Options: 'bce', 'focal' for siamese. 'contrastive', 'cosine' for other.
-        'loss': 'cosine',
+        # Options: 'bce', 'focal' for siamese/siamese_v2. 'contrastive', 'cosine' for other.
+        'loss': 'bce',
         
         # Model-specific parameters
-        'use_batchnorm': True,      # For original model
-        'embedding_dim': 64,         
-        'dropout': 0.5,              
-        'pretrained': True,          # For backbone models
+        'use_batchnorm': True,          # For original siamese model
+        'conv_dropout': 0.15,           # For siamese_v2 (spatial dropout in conv layers)
+        'fc_dropout': 0.4,              # For siamese_v2 (dropout in FC layers)
+        'use_se': True,                 # For siamese_v2 (Squeeze-Excitation attention)
+        'embedding_dim': 64,            # For custom/backbone
+        'dropout': 0.5,                 # For custom/backbone
+        'pretrained': True,             # For backbone models
         'backbone_name': 'mobilenet_v3_small',  # Smaller backbone (~2.5M params vs ResNet18's ~11M)
         
         # Loss-specific parameters
-        'contrastive_margin': 2.0,   # For contrastive loss
-        'focal_alpha': 0.25,         # For focal loss
-        'focal_gamma': 2.0,          # For focal loss
-        'cosine_margin': 0.5,        # For cosine embedding loss
+        'contrastive_margin': 2.0,      # For contrastive loss
+        'focal_alpha': 0.25,            # For focal loss
+        'focal_gamma': 2.0,             # For focal loss
+        'cosine_margin': 0.5,           # For cosine embedding loss
         
         # Training
         'learning_rate': 0.001,      # Lower LR for embedding-based learning
@@ -272,18 +279,24 @@ def main():
         'weight_decay': 5e-4,        # INCREASED regularization (was 1e-4)
         
         # Scheduling
-        'lr_factor': 0.5,            # More aggressive LR reduction
-        'lr_patience': 10,           # Reduced patience
+        'lr_factor': 0.5,               # More aggressive LR reduction
+        'lr_patience': 15,              # Slightly more patience with stronger augmentation
         'num_epochs': 200,
         'early_stopping_patience': 100,  # REDUCED to stop earlier (was 200)
         
-        # Augmentation (LIGHT for small dataset)
+        # Augmentation
         'use_augmentation': True,
         'augmentations': [
-            K.RandomAffine(degrees=5, translate=(0.03, 0.03), scale=(0.95, 1.05), p=0.5),  # Reduced
+            # Geometric transforms
+            K.RandomAffine(degrees=15, translate=(0.05, 0.05), scale=(0.92, 1.08), p=0.9),
             K.RandomHorizontalFlip(p=0.5),
-            K.RandomGaussianNoise(mean=0.0, std=0.05, p=0.3),  # Reduced
-            K.RandomGaussianBlur(kernel_size=(3, 3), sigma=(0.1, 1.0), p=0.3),  # Reduced
+            
+            # Blur and noise
+            K.RandomGaussianBlur(kernel_size=(3, 3), sigma=(0.1, 1.5), p=0.75),
+            K.RandomGaussianNoise(mean=0.0, std=0.07, p=0.8),
+            
+            # Quality
+            K.RandomSharpness(sharpness=0.3, p=0.5),
         ],
 
         # Data loading
@@ -334,7 +347,7 @@ def main():
     augmentation = None
     if config['use_augmentation']:
         augmentation = nn.Sequential(*config['augmentations']).to(device)
-        print("Augmentation pipeline:")
+        print(f"Augmentation pipeline ({len(config['augmentations'])} transforms):")
         for i, aug in enumerate(config['augmentations'], 1):
             print(f"  {i}. {aug.__class__.__name__}")
         print()
@@ -367,9 +380,17 @@ def main():
         # Original Siamese Network - works with all losses!
         model = SiameseNetwork(use_batchnorm=config['use_batchnorm']).to(device)
     
+    elif config['architecture'] == 'siamese_v2':
+        # Improved Siamese Network with dropout and SE attention
+        model = SiameseNetV2(
+            conv_dropout=config.get('conv_dropout', 0.1),
+            fc_dropout=config.get('fc_dropout', 0.3),
+            use_se=config.get('use_se', True)
+        ).to(device)
+    
     elif config['architecture'] == 'custom':
         # Custom lightweight model - outputs embeddings
-        model = FaceVerificationNetLight(
+        model = FaceVerificationNet(
             embedding_dim=config['embedding_dim'],
             dropout=config['dropout']
         ).to(device)
@@ -397,7 +418,7 @@ def main():
             ).to(device)
     
     else:
-        raise ValueError(f"Unknown architecture: {config['architecture']}. Choose from: 'siamese', 'custom', 'backbone'")
+        raise ValueError(f"Unknown architecture: {config['architecture']}. Choose from: 'siamese', 'siamese_v2', 'custom', 'backbone'")
     
     print(f"Architecture: {config['architecture']}")
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
