@@ -9,7 +9,7 @@ import numpy as np
 
 from models.siamese_network import SiameseNetwork
 from models.siamese_v2 import SiameseNetV2
-from models.face_verification_net import FaceVerificationNet, FaceVerificationNetLight
+from models.face_verification_net import FaceVerificationNet
 from models.backbone_network import BackboneNetwork, BackboneNetworkWithClassifier
 from utils.losses import ContrastiveLoss
 from utils.dataloader import create_dataloaders
@@ -18,7 +18,7 @@ from utils.dataloader import create_dataloaders
 # ============================================================================
 # HARDCODED PATHS - EDIT THESE
 # ============================================================================
-EXPERIMENT_DIR = '0outputs/experiments/siamese_focal_adam_lr0.001_bs64'
+EXPERIMENTS_DIR = '0outputs/experiments'
 TRAIN_DATASET_JSON = '0data/datasets/train_dataset.json'
 VAL_DATASET_JSON = '0data/datasets/val_dataset.json'
 TEST_DATASET_JSON = '0data/datasets/test_dataset.json'
@@ -52,7 +52,7 @@ def load_model(checkpoint_path, device):
             use_se=config.get('use_se', True)
         )
     elif architecture == 'custom':
-        model = FaceVerificationNetLight(
+        model = FaceVerificationNet(
             embedding_dim=config.get('embedding_dim', 128),
             dropout=config.get('dropout', 0.4)
         )
@@ -242,77 +242,79 @@ def save_summary(experiment_dir, train_results, val_results, test_results):
 
 if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    experiment_dir = Path(EXPERIMENT_DIR)
-    model_path = experiment_dir / 'best_model.pth'
-    
-    print("=" * 80)
-    print("FINAL MODEL EVALUATION")
-    print("=" * 80)
-    print(f"Experiment: {experiment_dir.name}")
-    print(f"Device: {device}")
-    print("=" * 80)
-    
-    # Verify paths
-    if not model_path.exists():
-        print(f"❌ Model not found: {model_path}")
-        exit(1)
-    
-    for name, path in [("Train", TRAIN_DATASET_JSON), ("Val", VAL_DATASET_JSON), ("Test", TEST_DATASET_JSON)]:
-        if not Path(path).exists():
-            print(f"❌ {name} dataset not found: {path}")
-            exit(1)
-    
-    # Load model
-    print("\nLoading model...")
-    model, architecture, loss_type = load_model(model_path, device)
-    print(f"  Architecture: {architecture}")
-    print(f"  Loss: {loss_type}")
-    
-    # Create dataloaders
-    print("\nCreating dataloaders...")
-    results = {}
-    
-    for split_name, dataset_json in [
-        ("train", TRAIN_DATASET_JSON),
-        ("val", VAL_DATASET_JSON),
-        ("test", TEST_DATASET_JSON)
-    ]:
-        # Create temporary dataloader for this split
-        loaders = create_dataloaders(
-            train_dataset_json=dataset_json,
-            val_dataset_json=dataset_json,  # Dummy, won't be used
-            batch_size=BATCH_SIZE,
-            num_workers=NUM_WORKERS
-        )
-        dataloader = loaders['train']
+    experiments_dir = Path(EXPERIMENTS_DIR)
+
+    for experiment_dir in experiments_dir.iterdir():
+        model_path = experiment_dir / 'best_model.pth'
         
-        print(f"\nEvaluating {split_name.upper()} set...")
-        results[split_name] = evaluate_dataset(model, dataloader, device, loss_type)
-        print(f"  Accuracy: {results[split_name]['accuracy']:.2f}%")
-    
-    # Print summary table
-    print("\n" + "=" * 80)
-    print("RESULTS SUMMARY")
-    print("=" * 80)
-    print(f"{'Split':<15} {'Accuracy':<15} {'Positive':<15} {'Negative':<15}")
-    print("-" * 80)
-    for split in ['train', 'val', 'test']:
-        r = results[split]
-        print(f"{split.capitalize():<15} {r['accuracy']:<15.2f}% {r['positive_accuracy']:<15.2f}% {r['negative_accuracy']:<15.2f}%")
-    print("=" * 80)
-    
-    # Save results
-    print("\nSaving results...")
-    create_visualization(experiment_dir, results['train'], results['val'], results['test'])
-    save_summary(experiment_dir, results['train'], results['val'], results['test'])
-    
-    # Save individual JSON files
-    for split in ['train', 'val', 'test']:
-        json_file = experiment_dir / f'{split}_results.json'
-        with open(json_file, 'w') as f:
-            json.dump(results[split], f, indent=2)
-        print(f"✓ Saved: {json_file}")
-    
-    print("\n" + "=" * 80)
-    print("EVALUATION COMPLETE")
-    print("=" * 80)
+        print("=" * 80)
+        print("FINAL MODEL EVALUATION")
+        print("=" * 80)
+        print(f"Experiment: {experiment_dir.name}")
+        print(f"Device: {device}")
+        print("=" * 80)
+        
+        # Verify paths
+        if not model_path.exists():
+            print(f"❌ Model not found: {model_path}")
+            exit(1)
+        
+        for name, path in [("Train", TRAIN_DATASET_JSON), ("Val", VAL_DATASET_JSON), ("Test", TEST_DATASET_JSON)]:
+            if not Path(path).exists():
+                print(f"❌ {name} dataset not found: {path}")
+                exit(1)
+        
+        # Load model
+        print("\nLoading model...")
+        model, architecture, loss_type = load_model(model_path, device)
+        print(f"  Architecture: {architecture}")
+        print(f"  Loss: {loss_type}")
+        
+        # Create dataloaders
+        print("\nCreating dataloaders...")
+        results = {}
+        
+        for split_name, dataset_json in [
+            ("train", TRAIN_DATASET_JSON),
+            ("val", VAL_DATASET_JSON),
+            ("test", TEST_DATASET_JSON)
+        ]:
+            # Create temporary dataloader for this split
+            loaders = create_dataloaders(
+                train_dataset_json=dataset_json,
+                val_dataset_json=dataset_json,  # Dummy, won't be used
+                batch_size=BATCH_SIZE,
+                num_workers=NUM_WORKERS
+            )
+            dataloader = loaders['train']
+            
+            print(f"\nEvaluating {split_name.upper()} set...")
+            results[split_name] = evaluate_dataset(model, dataloader, device, loss_type)
+            print(f"  Accuracy: {results[split_name]['accuracy']:.2f}%")
+        
+        # Print summary table
+        print("\n" + "=" * 80)
+        print("RESULTS SUMMARY")
+        print("=" * 80)
+        print(f"{'Split':<15} {'Accuracy':<15} {'Positive':<15} {'Negative':<15}")
+        print("-" * 80)
+        for split in ['train', 'val', 'test']:
+            r = results[split]
+            print(f"{split.capitalize():<15} {r['accuracy']:<15.2f}% {r['positive_accuracy']:<15.2f}% {r['negative_accuracy']:<15.2f}%")
+        print("=" * 80)
+        
+        # Save results
+        print("\nSaving results...")
+        create_visualization(experiment_dir, results['train'], results['val'], results['test'])
+        save_summary(experiment_dir, results['train'], results['val'], results['test'])
+        
+        # Save individual JSON files
+        for split in ['train', 'val', 'test']:
+            json_file = experiment_dir / f'{split}_results.json'
+            with open(json_file, 'w') as f:
+                json.dump(results[split], f, indent=2)
+            print(f"✓ Saved: {json_file}")
+        
+        print("\n" + "=" * 80)
+        print("EVALUATION COMPLETE")
+        print("=" * 80)

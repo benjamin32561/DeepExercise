@@ -29,7 +29,7 @@ def train_epoch(model, train_loader, optimizer, criterion, device, augmentation=
     embedding_losses = ['contrastive', 'cosine']
     score_losses = ['bce', 'focal']
     
-    pbar = tqdm(train_loader, desc="  Training", leave=False, ncols=100)
+    pbar = tqdm(train_loader, desc="  Training", leave=False, dynamic_ncols=True, position=1, file=None)
     
     for img1, img2, labels in pbar:
         # Move to device
@@ -122,7 +122,7 @@ def validate(model, val_loader, criterion, device, loss_type='bce'):
     embedding_losses = ['contrastive', 'cosine']
     score_losses = ['bce', 'focal']
     
-    pbar = tqdm(val_loader, desc="  Validation", leave=False, ncols=100)
+    pbar = tqdm(val_loader, desc="  Validation", leave=False, dynamic_ncols=True, position=1, file=None)
     
     with torch.no_grad():
         for img1, img2, labels in pbar:
@@ -235,7 +235,6 @@ def plot_training_curves(history, best_epoch, best_val_acc, output_dir):
     
     # Save
     plt.savefig(output_dir / 'training_curves.png', dpi=150, bbox_inches='tight')
-    print(f"\nSaved training curves: {output_dir / 'training_curves.png'}")
     plt.close()
 
 
@@ -249,17 +248,15 @@ def main():
         
         # Model Architecture
         # Options: 'siamese', 'siamese_v2', 'custom', 'backbone'
-        'architecture': 'siamese',
+        'architecture': 'siamese', 
 
         # Loss Function
         # Options: 'bce', 'focal' for siamese/siamese_v2. 'contrastive', 'cosine' for other.
         'loss': 'bce',
         
         # Model-specific parameters
-        'use_batchnorm': True,          # For original siamese model
-        'conv_dropout': 0.15,           # For siamese_v2 (spatial dropout in conv layers)
-        'fc_dropout': 0.4,              # For siamese_v2 (dropout in FC layers)
-        'use_se': True,                 # For siamese_v2 (Squeeze-Excitation attention)
+        'use_batchnorm': False,          # For siamese/siamese_v2
+        'fc_dropout': 0.3,              # For siamese_v2 (light dropout on FC layer only)
         'embedding_dim': 64,            # For custom/backbone
         'dropout': 0.5,                 # For custom/backbone
         'pretrained': True,             # For backbone models
@@ -272,31 +269,25 @@ def main():
         'cosine_margin': 0.5,           # For cosine embedding loss
         
         # Training
-        'learning_rate': 0.001,      # Lower LR for embedding-based learning
-        'batch_size': 64,            # REDUCED for small dataset (was 128)
-        'optimizer': 'adam',         # Adam is better for custom model
+        'learning_rate': 0.001,
+        'batch_size': 64,
+        'optimizer': 'sgd',         # Adam is better for custom model
         'momentum': 0.9,             # For SGD (if used)
-        'weight_decay': 5e-4,        # INCREASED regularization (was 1e-4)
+        'weight_decay': 1e-4,
         
         # Scheduling
-        'lr_factor': 0.5,               # More aggressive LR reduction
-        'lr_patience': 15,              # Slightly more patience with stronger augmentation
+        'lr_factor': 0.75,               
+        'lr_patience': 15,              
         'num_epochs': 200,
-        'early_stopping_patience': 100,  # REDUCED to stop earlier (was 200)
+        'early_stopping_patience': 50,
         
-        # Augmentation
         'use_augmentation': True,
         'augmentations': [
-            # Geometric transforms
-            K.RandomAffine(degrees=15, translate=(0.05, 0.05), scale=(0.92, 1.08), p=0.9),
+            K.RandomAffine(degrees=15, translate=(0.05, 0.05), scale=(0.93, 1.07), p=0.75),
             K.RandomHorizontalFlip(p=0.5),
-            
-            # Blur and noise
-            K.RandomGaussianBlur(kernel_size=(3, 3), sigma=(0.1, 1.5), p=0.75),
-            K.RandomGaussianNoise(mean=0.0, std=0.07, p=0.8),
-            
-            # Quality
-            K.RandomSharpness(sharpness=0.3, p=0.5),
+
+            # K.RandomGaussianBlur(kernel_size=(3, 3), sigma=(0.1, 1.0), p=1.0),
+            K.RandomGaussianNoise(mean=0.0, std=0.1, p=0.5),
         ],
 
         # Data loading
@@ -381,11 +372,10 @@ def main():
         model = SiameseNetwork(use_batchnorm=config['use_batchnorm']).to(device)
     
     elif config['architecture'] == 'siamese_v2':
-        # Improved Siamese Network with dropout and SE attention
+        # Simplified Siamese V2: Original architecture + light FC dropout
         model = SiameseNetV2(
-            conv_dropout=config.get('conv_dropout', 0.1),
-            fc_dropout=config.get('fc_dropout', 0.3),
-            use_se=config.get('use_se', True)
+            use_batchnorm=config.get('use_batchnorm', True),
+            fc_dropout=config.get('fc_dropout', 0.3)  # Light dropout for regularization
         ).to(device)
     
     elif config['architecture'] == 'custom':
@@ -486,7 +476,7 @@ def main():
     
     start_time = time.time()
     
-    epoch_pbar = tqdm(range(1, config['num_epochs'] + 1), desc="Epochs", ncols=120)
+    epoch_pbar = tqdm(range(1, config['num_epochs'] + 1), desc="Epochs", dynamic_ncols=True, position=0, file=None)
     
     for epoch in epoch_pbar:
         epoch_start = time.time()

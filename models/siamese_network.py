@@ -140,7 +140,6 @@ class SiameseNetwork(nn.Module):
         x = self.fc1(x)
         if self.use_batchnorm:
             x = self.bn_fc(x)
-        # NO sigmoid here - embeddings should be unbounded
         
         return x
     

@@ -134,9 +134,11 @@ def visualize_augmentations(
 if __name__ == '__main__':
     # Define augmentations to test
     augmentations = [
-        K.RandomAffine(degrees=15, translate=(0.05, 0.05), scale=(0.93, 1.07), p=0.5),
+        K.RandomAffine(degrees=15, translate=(0.05, 0.05), scale=(0.93, 1.07), p=1.0),
         K.RandomHorizontalFlip(p=0.5),
-        K.RandomGaussianNoise(mean=0.0, std=0.07, p=0.5),
+
+        # K.RandomGaussianBlur(kernel_size=(3, 3), sigma=(0.1, 1.0), p=1.0),
+        K.RandomGaussianNoise(mean=0.0, std=0.1, p=1.0),
     ]
     
     visualize_augmentations(
