@@ -2,14 +2,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from torchvision import transforms
 import matplotlib.pyplot as plt
 import numpy as np
+import random
 from pathlib import Path
 import json
 from tqdm import tqdm
 from sklearn.metrics import roc_curve, auc
 
-from models.face_verification_net import FaceVerificationNetLight
+from models.face_verification_net import FaceVerificationNet
 from models.backbone_network import BackboneNetwork
 from utils.dataset import SiameseDataset
 
@@ -17,7 +19,7 @@ from utils.dataset import SiameseDataset
 # ============================================================================
 # HARDCODED PATHS - EDIT THESE
 # ============================================================================
-EXPERIMENT_DIR = '0outputs/experiments/custom_triplet_adam_lr0.001_bs32'
+EXPERIMENTS_DIR = '0outputs/experiments'
 TRAIN_DATASET_JSON = '0data/datasets/train_dataset.json'
 VAL_DATASET_JSON = '0data/datasets/val_dataset.json'
 TEST_DATASET_JSON = '0data/datasets/test_dataset.json'
@@ -27,15 +29,24 @@ NUM_WORKERS = 8
 
 
 def load_model(checkpoint_path, device):
-    """Load triplet-trained model from checkpoint."""
+    """
+    Load triplet-trained model from checkpoint.
+    Returns None, None if architecture is not supported.
+    """
     checkpoint = torch.load(checkpoint_path, map_location=device)
     config = checkpoint['config']
     
     architecture = config.get('architecture')
     
+    # Only support architectures with forward_once method
+    if architecture not in ['custom', 'backbone']:
+        print(f"  ⚠️  Skipping unsupported architecture: {architecture}")
+        print(f"      (Triplet evaluation requires 'custom' or 'backbone' models)")
+        return None, None
+    
     # Create model
     if architecture == 'custom':
-        model = FaceVerificationNetLight(
+        model = FaceVerificationNet(
             embedding_dim=config.get('embedding_dim', 128),
             dropout=config.get('dropout', 0.4)
         )
@@ -47,8 +58,6 @@ def load_model(checkpoint_path, device):
             pretrained=config.get('pretrained', True),
             dropout=config.get('dropout', 0.4)
         )
-    else:
-        raise ValueError(f"Unknown architecture: {architecture}")
     
     # Load weights
     model.load_state_dict(checkpoint['model_state_dict'])
@@ -305,108 +314,149 @@ def save_summary(experiment_dir, train_results, val_results, test_results, confi
     print(f"✓ Saved: {summary_path}")
 
 
+def set_seed(seed=42):
+    """Set random seed for reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    # Make cudnn deterministic (slower but reproducible)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
 def main():
     """Main testing function."""
+    # Set random seed for reproducibility
+    set_seed(42)
+    
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    experiment_dir = Path(EXPERIMENT_DIR)
-    model_path = experiment_dir / 'best_model.pth'
+    experiments_dir = Path(EXPERIMENTS_DIR)
+    for experiment_dir in experiments_dir.iterdir():
+        if not experiment_dir.is_dir():
+            continue
+            
+        model_path = experiment_dir / 'best_model.pth'
     
-    print("="*80)
-    print("TRIPLET MODEL EVALUATION")
-    print("="*80)
-    print(f"Experiment: {experiment_dir.name}")
-    print(f"Device: {device}")
-    print("="*80)
-    print()
-    
-    # Load model
-    print("Loading model...")
-    model, config = load_model(model_path, device)
-    print(f"  Architecture: {config.get('architecture')}")
-    print(f"  Backbone: {config.get('backbone_name', 'N/A')}")
-    print()
-    
-    # Create dataloaders
-    print("Creating dataloaders...")
-    train_dataset = SiameseDataset(TRAIN_DATASET_JSON)
-    val_dataset = SiameseDataset(VAL_DATASET_JSON)
-    test_dataset = SiameseDataset(TEST_DATASET_JSON)
-    
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False, 
-                             num_workers=NUM_WORKERS, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, 
-                           num_workers=NUM_WORKERS, pin_memory=True)
-    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, 
+        # Skip if no model file
+        if not model_path.exists():
+            continue
+            
+        print("="*80)
+        print("TRIPLET MODEL EVALUATION")
+        print("="*80)
+        print(f"Experiment: {experiment_dir.name}")
+        print(f"Device: {device}")
+        print("="*80)
+        print()
+        
+        # Load model
+        print("Loading model...")
+        model, config = load_model(model_path, device)
+            
+        # Skip if model couldn't be loaded
+        if model is None:
+            print()
+            continue
+            
+        print(f"  Architecture: {config.get('architecture')}")
+        print(f"  Backbone: {config.get('backbone_name', 'N/A')}")
+        print()
+        
+        # Create dataloaders with ImageNet normalization (used everywhere in codebase)
+        print("Creating dataloaders...")
+        
+        # Use ImageNet normalization (consistent across all datasets)
+        test_transform = transforms.Compose([
+            transforms.Resize((105, 105)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+        
+        train_dataset = SiameseDataset(TRAIN_DATASET_JSON)
+        train_dataset.transform = test_transform  # Override default transform
+        
+        val_dataset = SiameseDataset(VAL_DATASET_JSON)
+        val_dataset.transform = test_transform
+        
+        test_dataset = SiameseDataset(TEST_DATASET_JSON)
+        test_dataset.transform = test_transform
+        
+        train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False, 
+                                num_workers=NUM_WORKERS, pin_memory=True)
+        val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, 
                             num_workers=NUM_WORKERS, pin_memory=True)
-    print()
-    
-    # Compute distances for all splits
-    print("Computing distances...")
-    train_distances, train_labels = compute_distances(model, train_loader, device)
-    val_distances, val_labels = compute_distances(model, val_loader, device)
-    test_distances, test_labels = compute_distances(model, test_loader, device)
-    print()
-    
-    # Find optimal threshold on validation set
-    print("Finding optimal threshold on validation set...")
-    optimal_threshold, best_val_acc, val_fpr, val_tpr, val_auc = find_optimal_threshold(val_distances, val_labels)
-    print(f"  Optimal threshold: {optimal_threshold:.4f}")
-    print(f"  Validation accuracy: {best_val_acc*100:.2f}%")
-    print(f"  Validation AUC: {val_auc:.4f}")
-    print()
-    
-    # Compute test AUC
-    _, _, test_fpr, test_tpr, test_auc = find_optimal_threshold(test_distances, test_labels)
-    print(f"  Test AUC: {test_auc:.4f}")
-    print()
-    
-    # Evaluate all splits with optimal threshold
-    print("Evaluating with optimal threshold...")
-    train_results = evaluate_with_threshold(train_distances, train_labels, optimal_threshold)
-    val_results = evaluate_with_threshold(val_distances, val_labels, optimal_threshold)
-    test_results = evaluate_with_threshold(test_distances, test_labels, optimal_threshold)
-    print()
-    
-    # Print results
-    print("="*80)
-    print("RESULTS")
-    print("="*80)
-    print(f"{'Split':<15} {'Overall':<15} {'Same Person':<15} {'Different Person':<15}")
-    print("-"*80)
-    for split_name, results in [('Train', train_results), ('Val', val_results), ('Test', test_results)]:
-        print(f"{split_name:<15} "
-              f"{results['accuracy']:>7.2f}%      "
-              f"{results['positive_accuracy']:>7.2f}%        "
-              f"{results['negative_accuracy']:>7.2f}%")
-    print("="*80)
-    print()
-    
-    # Save results
-    print("Saving results...")
-    
-    # Save JSON results
-    for split_name, results in [('train', train_results), ('val', val_results), ('test', test_results)]:
-        with open(experiment_dir / f'{split_name}_triplet_results.json', 'w') as f:
-            json.dump(results, f, indent=2)
-    
-    # Create visualizations
-    create_roc_visualization(experiment_dir, val_fpr, val_tpr, val_auc, test_fpr, test_tpr, test_auc)
-    print(f"✓ Saved: {experiment_dir / 'roc_curve.png'}")
-    
-    create_distance_distribution(experiment_dir, train_distances, train_labels,
-                                val_distances, val_labels, test_distances, test_labels,
-                                optimal_threshold)
-    print(f"✓ Saved: {experiment_dir / 'distance_distributions.png'}")
-    
-    create_results_visualization(experiment_dir, train_results, val_results, test_results)
-    print(f"✓ Saved: {experiment_dir / 'triplet_evaluation.png'}")
-    
-    save_summary(experiment_dir, train_results, val_results, test_results, config)
-    
-    print()
-    print("="*80)
-    print("EVALUATION COMPLETE")
-    print("="*80)
+        test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, 
+                                num_workers=NUM_WORKERS, pin_memory=True)
+        print()
+        
+        # Compute distances for all splits
+        print("Computing distances...")
+        train_distances, train_labels = compute_distances(model, train_loader, device)
+        val_distances, val_labels = compute_distances(model, val_loader, device)
+        test_distances, test_labels = compute_distances(model, test_loader, device)
+        print()
+        
+        # Find optimal threshold on validation set
+        print("Finding optimal threshold on validation set...")
+        optimal_threshold, best_val_acc, val_fpr, val_tpr, val_auc = find_optimal_threshold(val_distances, val_labels)
+        print(f"  Optimal threshold: {optimal_threshold:.4f}")
+        print(f"  Validation accuracy: {best_val_acc*100:.2f}%")
+        print(f"  Validation AUC: {val_auc:.4f}")
+        print()
+        
+        # Compute test AUC
+        _, _, test_fpr, test_tpr, test_auc = find_optimal_threshold(test_distances, test_labels)
+        print(f"  Test AUC: {test_auc:.4f}")
+        print()
+        
+        # Evaluate all splits with optimal threshold
+        print("Evaluating with optimal threshold...")
+        train_results = evaluate_with_threshold(train_distances, train_labels, optimal_threshold)
+        val_results = evaluate_with_threshold(val_distances, val_labels, optimal_threshold)
+        test_results = evaluate_with_threshold(test_distances, test_labels, optimal_threshold)
+        print()
+        
+        # Print results
+        print("="*80)
+        print("RESULTS")
+        print("="*80)
+        print(f"{'Split':<15} {'Overall':<15} {'Same Person':<15} {'Different Person':<15}")
+        print("-"*80)
+        for split_name, results in [('Train', train_results), ('Val', val_results), ('Test', test_results)]:
+            print(f"{split_name:<15} "
+                f"{results['accuracy']:>7.2f}%      "
+                f"{results['positive_accuracy']:>7.2f}%        "
+                f"{results['negative_accuracy']:>7.2f}%")
+        print("="*80)
+        print()
+        
+        # Save results
+        print("Saving results...")
+        
+        # Save JSON results
+        for split_name, results in [('train', train_results), ('val', val_results), ('test', test_results)]:
+            with open(experiment_dir / f'{split_name}_triplet_results.json', 'w') as f:
+                json.dump(results, f, indent=2)
+        
+        # Create visualizations
+        create_roc_visualization(experiment_dir, val_fpr, val_tpr, val_auc, test_fpr, test_tpr, test_auc)
+        print(f"✓ Saved: {experiment_dir / 'roc_curve.png'}")
+        
+        create_distance_distribution(experiment_dir, train_distances, train_labels,
+                                    val_distances, val_labels, test_distances, test_labels,
+                                    optimal_threshold)
+        print(f"✓ Saved: {experiment_dir / 'distance_distributions.png'}")
+        
+        create_results_visualization(experiment_dir, train_results, val_results, test_results)
+        print(f"✓ Saved: {experiment_dir / 'triplet_evaluation.png'}")
+        
+        save_summary(experiment_dir, train_results, val_results, test_results, config)
+        
+        print()
+        print("="*80)
+        print("EVALUATION COMPLETE")
+        print("="*80)
 
 
 if __name__ == '__main__':

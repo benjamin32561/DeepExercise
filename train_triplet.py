@@ -7,10 +7,12 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import time
 import json
+import random
+import numpy as np
 from tqdm import tqdm
 import kornia.augmentation as K
 
-from models.face_verification_net import FaceVerificationNetLight
+from models.face_verification_net import FaceVerificationNet
 from models.backbone_network import BackboneNetwork
 from utils.losses import TripletLoss
 from utils.triplet_dataset import create_triplet_dataloaders
@@ -55,7 +57,7 @@ def train_epoch(model, train_loader, optimizer, criterion, device, augmentation=
     correct = 0
     total = 0
     
-    pbar = tqdm(train_loader, desc="  Training", leave=False)
+    pbar = tqdm(train_loader, desc="  Training", leave=False, ncols=100, dynamic_ncols=True, position=1, file=None)
     
     for anchor, positive, negative, _ in pbar:
         anchor = anchor.to(device)
@@ -110,7 +112,7 @@ def validate(model, val_loader, criterion, device):
     total = 0
     
     with torch.no_grad():
-        pbar = tqdm(val_loader, desc="  Validating", leave=False)
+        pbar = tqdm(val_loader, desc="  Validation", leave=False, ncols=100, dynamic_ncols=True, position=1, file=None)
         
         for anchor, positive, negative, _ in pbar:
             anchor = anchor.to(device)
@@ -142,8 +144,22 @@ def validate(model, val_loader, criterion, device):
     return total_loss / len(val_loader), 100.0 * correct / total
 
 
+def set_seed(seed=42):
+    """Set random seed for reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    # Make cudnn deterministic (slower but reproducible)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
 def main():
     """Main training function for triplet loss."""
+    
+    # Set random seed for reproducibility
+    set_seed(42)
     
     config = {
         # Paths
@@ -156,7 +172,7 @@ def main():
         'architecture': 'backbone',
         
         # Model-specific parameters
-        'embedding_dim': 128,
+        'embedding_dim': 16,
         'dropout': 0.5,
         'pretrained': True,  # For backbone
         'backbone_name': 'mobilenet_v3_small',
@@ -172,22 +188,29 @@ def main():
         'weight_decay': 5e-4,
         
         # Scheduling
-        'lr_factor': 0.5,
-        'lr_patience': 10,
-        'num_epochs': 200,
-        'early_stopping_patience': 100,
+        'lr_factor': 0.75,
+        'lr_patience': 20,
+        'num_epochs': 500,
+        'early_stopping_patience': 200,
         
-        # Augmentation
+        # Augmentation - AGGRESSIVE (model generalizes well!)
         'use_augmentation': True,
         'augmentations': [
-            K.RandomAffine(degrees=5, translate=(0.03, 0.03), scale=(0.95, 1.05), p=0.5),
+            # Geometric transforms
+            K.RandomAffine(degrees=20, translate=(0.15, 0.15), scale=(0.85, 1.15), p=0.5),
             K.RandomHorizontalFlip(p=0.5),
-            K.RandomGaussianNoise(mean=0.0, std=0.05, p=0.3),
-            K.RandomGaussianBlur(kernel_size=(3, 3), sigma=(0.1, 1.0), p=0.3),
+            K.RandomPerspective(distortion_scale=0.2, p=0.3),
+            
+            # Blur & Noise
+            K.RandomGaussianBlur(kernel_size=(3, 3), sigma=(0.1, 2.0), p=0.3),
+            K.RandomGaussianNoise(mean=0.0, std=0.12, p=0.3),
+            
+            # Intensity & Color
+            K.RandomGrayscale(p=0.3),
         ],
         
         # Data loading
-        'num_workers': 8,
+        'num_workers': 16,
     }
     
     # Setup
@@ -248,7 +271,7 @@ def main():
     # Create model
     print("Creating model...")
     if config['architecture'] == 'custom':
-        model = FaceVerificationNetLight(
+        model = FaceVerificationNet(
             embedding_dim=config['embedding_dim'],
             dropout=config['dropout']
         ).to(device)
@@ -309,7 +332,7 @@ def main():
     
     start_time = time.time()
     
-    epoch_pbar = tqdm(range(1, config['num_epochs'] + 1), desc="Epochs", ncols=120)
+    epoch_pbar = tqdm(range(1, config['num_epochs'] + 1), desc="Epochs", ncols=120, dynamic_ncols=True, position=0, file=None)
     
     for epoch in epoch_pbar:
         epoch_start = time.time()

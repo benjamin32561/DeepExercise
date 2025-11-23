@@ -128,10 +128,11 @@ def create_triplet_dataloaders(train_json, val_json, batch_size=32, num_workers=
     from torch.utils.data import DataLoader
     
     # Basic transforms (augmentation will be done on GPU with Kornia)
+    # Use ImageNet normalization for pretrained backbones
     transform = transforms.Compose([
         transforms.Resize((105, 105)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     
     train_dataset = TripletDataset(train_json, transform=transform)

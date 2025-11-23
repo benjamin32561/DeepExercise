@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
+import random
 
 from models.siamese_network import SiameseNetwork
 from models.siamese_v2 import SiameseNetV2
@@ -47,9 +48,8 @@ def load_model(checkpoint_path, device):
         model = SiameseNetwork(use_batchnorm=config.get('use_batchnorm', True))
     elif architecture == 'siamese_v2':
         model = SiameseNetV2(
-            conv_dropout=config.get('conv_dropout', 0.1),
-            fc_dropout=config.get('fc_dropout', 0.3),
-            use_se=config.get('use_se', True)
+            use_batchnorm=config.get('use_batchnorm', True),
+            fc_dropout=config.get('fc_dropout', 0.3)
         )
     elif architecture == 'custom':
         model = FaceVerificationNet(
@@ -240,11 +240,28 @@ def save_summary(experiment_dir, train_results, val_results, test_results):
     print(f"✓ Saved: {summary_file}")
 
 
+def set_seed(seed=42):
+    """Set random seed for reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    # Make cudnn deterministic (slower but reproducible)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
 if __name__ == '__main__':
+    # Set random seed for reproducibility
+    set_seed(42)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     experiments_dir = Path(EXPERIMENTS_DIR)
-
+    
+    # Iterate through all experiments (skip triplet models - use test_triplet.py for those)
     for experiment_dir in experiments_dir.iterdir():
+        if not experiment_dir.is_dir():
+            continue
+            
         model_path = experiment_dir / 'best_model.pth'
         
         print("=" * 80)
@@ -254,15 +271,12 @@ if __name__ == '__main__':
         print(f"Device: {device}")
         print("=" * 80)
         
-        # Verify paths
-        if not model_path.exists():
-            print(f"❌ Model not found: {model_path}")
-            exit(1)
-        
+        # Verify dataset paths
         for name, path in [("Train", TRAIN_DATASET_JSON), ("Val", VAL_DATASET_JSON), ("Test", TEST_DATASET_JSON)]:
             if not Path(path).exists():
                 print(f"❌ {name} dataset not found: {path}")
-                exit(1)
+                print(f"   Skipping {experiment_dir.name}")
+                continue
         
         # Load model
         print("\nLoading model...")

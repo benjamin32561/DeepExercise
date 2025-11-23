@@ -6,6 +6,8 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from pathlib import Path
 import time
 import json
+import random
+import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import kornia.augmentation as K
@@ -238,7 +240,21 @@ def plot_training_curves(history, best_epoch, best_val_acc, output_dir):
     plt.close()
 
 
+def set_seed(seed=42):
+    """Set random seed for reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    # Make cudnn deterministic (slower but reproducible)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
 def main():
+    # Set random seed for reproducibility
+    set_seed(42)
+    
     # Configuration
     config = {
         # Paths
@@ -248,16 +264,16 @@ def main():
         
         # Model Architecture
         # Options: 'siamese', 'siamese_v2', 'custom', 'backbone'
-        'architecture': 'siamese', 
+        'architecture': 'backbone', 
 
         # Loss Function
         # Options: 'bce', 'focal' for siamese/siamese_v2. 'contrastive', 'cosine' for other.
-        'loss': 'bce',
+        'loss': 'contrastive',
         
         # Model-specific parameters
-        'use_batchnorm': False,          # For siamese/siamese_v2
+        'use_batchnorm': True,          # For siamese/siamese_v2
         'fc_dropout': 0.3,              # For siamese_v2 (light dropout on FC layer only)
-        'embedding_dim': 64,            # For custom/backbone
+        'embedding_dim': 16,            # For custom/backbone
         'dropout': 0.5,                 # For custom/backbone
         'pretrained': True,             # For backbone models
         'backbone_name': 'mobilenet_v3_small',  # Smaller backbone (~2.5M params vs ResNet18's ~11M)
@@ -271,23 +287,28 @@ def main():
         # Training
         'learning_rate': 0.001,
         'batch_size': 64,
-        'optimizer': 'sgd',         # Adam is better for custom model
+        'optimizer': 'adam',         # CRITICAL: Adam, not SGD!
         'momentum': 0.9,             # For SGD (if used)
-        'weight_decay': 1e-4,
+        'weight_decay': 0.0005,      
         
         # Scheduling
-        'lr_factor': 0.75,               
-        'lr_patience': 15,              
+        'lr_factor': 0.5,            
+        'lr_patience': 10,                         
         'num_epochs': 200,
-        'early_stopping_patience': 50,
+        'early_stopping_patience': 100,
         
         'use_augmentation': True,
         'augmentations': [
-            K.RandomAffine(degrees=15, translate=(0.05, 0.05), scale=(0.93, 1.07), p=0.75),
+            K.RandomAffine(degrees=20, translate=(0.15, 0.15), scale=(0.85, 1.15), p=0.5),
             K.RandomHorizontalFlip(p=0.5),
-
-            # K.RandomGaussianBlur(kernel_size=(3, 3), sigma=(0.1, 1.0), p=1.0),
-            K.RandomGaussianNoise(mean=0.0, std=0.1, p=0.5),
+            K.RandomPerspective(distortion_scale=0.2, p=0.3),
+            
+            # Blur & Noise
+            K.RandomGaussianBlur(kernel_size=(3, 3), sigma=(0.1, 2.0), p=0.3),
+            K.RandomGaussianNoise(mean=0.0, std=0.12, p=0.3),
+            
+            # Intensity & Color
+            K.RandomGrayscale(p=0.3),
         ],
 
         # Data loading
@@ -314,10 +335,6 @@ def main():
     print("=" * 80)
     print(f"Output directory: {output_dir}")
     print()
-    
-    # Enable cuDNN benchmark
-    if torch.cuda.is_available():
-        torch.backends.cudnn.benchmark = True
     
     print("=" * 80)
     print("Siamese Network Training")
