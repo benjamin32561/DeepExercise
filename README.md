@@ -4,6 +4,14 @@ Built a face verification system on a small dataset (~1000 people). **Triplet lo
 
 ---
 
+## Quick Links
+
+- **[Loss Functions](docs/LOSSES.md)** - What each loss does and why triplet won
+- **[Architectures](docs/ARCHITECTURES.md)** - Model details and comparisons
+- **[Configuration](docs/CONFIG.md)** - Training configs and how to run
+
+---
+
 ## Dataset
 
 ![Dataset Distribution](0outputs/figures/dataset_statistics.png)
@@ -28,30 +36,6 @@ Heavy augmentations to prevent overfitting on small data:
 - **RandomGrayscale**: occasional B&W
 
 ![Individual Augmentation Effects](0outputs/figures/individual_augmentation_effects.png)
-
----
-
-## What I Tried
-
-**Architectures**:
-- Siamese Network (vanilla)
-- SiameseV2 (with BatchNorm)
-- Custom CNN
-- Backbone (MobileNetV3-Small, pretrained)
-
-**Loss Functions**:
-- BCE
-- Focal Loss
-- Contrastive Loss
-- Cosine Embedding Loss
-- **Triplet Loss** ⭐
-
-**Hyperparameters**:
-- Optimizers: Adam (SGD failed)
-- LR: 0.001 with ReduceLROnPlateau
-- Batch: 32 for triplet, 64 for pairwise
-- Embedding dims: 16, 32, 64, 128
-- Weight decay: 0.0005
 
 ---
 
@@ -99,6 +83,8 @@ Even with data leakage (negatives from test set), pairwise models failed:
 3. Heavy augmentations
 4. Pretrained MobileNetV3-Small
 
+See [ARCHITECTURES.md](docs/ARCHITECTURES.md) for model details.
+
 ---
 
 ## Why Pairwise Models Failed
@@ -118,6 +104,8 @@ They either:
 1. Stuck at ~60% (barely better than random)
 2. Overfitted hard (99% train, 60% val)
 
+See [LOSSES.md](docs/LOSSES.md) for why each loss failed.
+
 ---
 
 ## Why This Happened
@@ -131,7 +119,7 @@ Custom models (Siamese, SiameseV2) learn from scratch. Not enough data. They mem
 MobileNetV3 already knows features from ImageNet. Only needs to learn face embeddings. Way more efficient.
 
 ### 3. BCE = Weak Signal
-Pairwise losses ask "same or different?". Model learns shortcuts (background color, lighting) instead of faces.
+Pairwise losses ask "same or different?". Model learns shortcuts (background, lighting) instead of faces.
 
 ### 4. Triplet Loss = Strong Signal
 Forces geometric structure: "A closer to P than N". Can't cheat this. Must learn real features.
@@ -148,6 +136,22 @@ Training shows 96% but evaluation shows 78%. Different metrics:
 - **Evaluation**: Checks if `dist(I1, I2) < threshold` (absolute)
 
 Absolute verification is harder than relative ranking.
+
+---
+
+## How to Run
+
+See [CONFIG.md](docs/CONFIG.md) for full configuration details.
+
+**Train triplet model**:
+```bash
+python train_triplet.py
+```
+
+**Train pairwise model**:
+```bash
+python train.py
+```
 
 ---
 
