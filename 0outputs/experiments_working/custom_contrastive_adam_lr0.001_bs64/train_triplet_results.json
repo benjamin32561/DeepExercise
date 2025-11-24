@@ -1,0 +1,12 @@
+{
+  "accuracy": 54.919786096256686,
+  "positive_accuracy": 50.160427807486634,
+  "negative_accuracy": 59.67914438502674,
+  "threshold": 0.026311473920941353,
+  "total_samples": 1870,
+  "positive_samples": 935,
+  "negative_samples": 935,
+  "correct": 1027,
+  "positive_correct": 469,
+  "negative_correct": 558
+}
