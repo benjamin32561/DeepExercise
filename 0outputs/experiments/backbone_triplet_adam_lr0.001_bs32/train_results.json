@@ -1,0 +1,8 @@
+{
+  "accuracy": 90.26737967914438,
+  "positive_accuracy": 98.18181818181819,
+  "negative_accuracy": 82.35294117647058,
+  "total_samples": 1870,
+  "positive_samples": 935,
+  "negative_samples": 935
+}
