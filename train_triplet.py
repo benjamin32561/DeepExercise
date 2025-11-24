@@ -173,7 +173,7 @@ def main():
         
         # Model-specific parameters
         'embedding_dim': 16,
-        'dropout': 0.3,
+        'dropout': 0.0,
         'pretrained': True,  # For backbone
         'backbone_name': 'mobilenet_v3_small',
         
@@ -182,7 +182,7 @@ def main():
         
         # Training
         'learning_rate': 0.001,
-        'batch_size': 32,  # Smaller for triplets (3x images per sample)
+        'batch_size': 32,
         'optimizer': 'adam',
         'momentum': 0.9,
         'weight_decay': 5e-4,
@@ -190,7 +190,7 @@ def main():
         # Scheduling
         'lr_factor': 0.75,
         'lr_patience': 20,
-        'num_epochs': 500,
+        'num_epochs': 400,
         'early_stopping_patience': 200,
         
         # Augmentation - AGGRESSIVE (model generalizes well!)

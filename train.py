@@ -264,7 +264,7 @@ def main():
         
         # Model Architecture
         # Options: 'siamese', 'siamese_v2', 'custom', 'backbone'
-        'architecture': 'backbone', 
+        'architecture': 'custom', 
 
         # Loss Function
         # Options: 'bce', 'focal' for siamese/siamese_v2. 'contrastive', 'cosine' for other.
@@ -272,9 +272,9 @@ def main():
         
         # Model-specific parameters
         'use_batchnorm': True,          # For siamese/siamese_v2
-        'fc_dropout': 0.3,              # For siamese_v2 (light dropout on FC layer only)
+        'fc_dropout': 0.0,              # For siamese_v2 (light dropout on FC layer only)
         'embedding_dim': 16,            # For custom/backbone
-        'dropout': 0.5,                 # For custom/backbone
+        'dropout': 0.1,                 # For custom/backbone
         'pretrained': True,             # For backbone models
         'backbone_name': 'mobilenet_v3_small',  # Smaller backbone (~2.5M params vs ResNet18's ~11M)
         
