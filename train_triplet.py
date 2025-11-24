@@ -173,7 +173,7 @@ def main():
         
         # Model-specific parameters
         'embedding_dim': 16,
-        'dropout': 0.5,
+        'dropout': 0.3,
         'pretrained': True,  # For backbone
         'backbone_name': 'mobilenet_v3_small',
         

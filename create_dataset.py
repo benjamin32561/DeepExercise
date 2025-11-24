@@ -77,26 +77,30 @@ def get_all_people_images(data_dir: str) -> Dict[str, List[str]]:
 def generate_negative_pairs(
     num_pairs: int,
     person_to_images: Dict[str, List[str]],
+    allowed_people: List[str],
     random_seed: int
 ) -> List[Tuple[str, str, int]]:
     """
-    Generate negative pairs (different people).
+    Generate negative pairs (different people) using only allowed people.
     
     Args:
         num_pairs: Number of negative pairs to generate
         person_to_images: Dictionary of person -> images
+        allowed_people: List of person names allowed for this split
         random_seed: Random seed for reproducibility
         
     Returns:
         List of (image1_path, image2_path, label=0) tuples
     """
     random.seed(random_seed)
-    people_list = list(person_to_images.keys())
     negative_pairs = []
     
+    if len(allowed_people) < 2:
+        raise ValueError(f"Need at least 2 people to generate negative pairs, got {len(allowed_people)}")
+    
     for _ in range(num_pairs):
-        # Sample two different people
-        person1, person2 = random.sample(people_list, 2)
+        # Sample two different people from allowed list
+        person1, person2 = random.sample(allowed_people, 2)
         
         # Sample one image from each
         img1 = random.choice(person_to_images[person1])
@@ -208,14 +212,53 @@ def create_datasets(
     print(f"  Found {len(test_positive)} positive pairs")
     print()
     
+    # Extract people from positive pairs to define disjoint sets
+    print("Extracting people from positive pairs...")
+    train_people = set()
+    for path1, path2, _ in train_positive:
+        train_people.add(Path(path1).parent.name)
+        train_people.add(Path(path2).parent.name)
+    
+    test_people = set()
+    for path1, path2, _ in test_positive:
+        test_people.add(Path(path1).parent.name)
+        test_people.add(Path(path2).parent.name)
+        
+    # Validation people are a subset of train people (since we split train pairs)
+    # But for negative pairs, we want to be careful.
+    # Let's define:
+    # Train negatives: sample from train_people
+    # Val negatives: sample from train_people (since val is part of train split)
+    # Test negatives: sample from test_people ONLY
+    
+    # Verify intersection
+    intersection = train_people.intersection(test_people)
+    if intersection:
+        print(f"⚠️  WARNING: Found {len(intersection)} people in both Train and Test sets!")
+        print(f"   Examples: {list(intersection)[:5]}")
+    else:
+        print("✓ Train and Test people are disjoint.")
+        
+    train_people_list = list(train_people)
+    test_people_list = list(test_people)
+    
+    print(f"  Train/Val pool: {len(train_people_list)} people")
+    print(f"  Test pool:      {len(test_people_list)} people")
+    print()
+    
     # Generate negative pairs for each split
     print("Generating negative pairs...")
-    train_negative = generate_negative_pairs(len(train_positive), person_to_images, random_seed)
-    val_negative = generate_negative_pairs(len(val_positive), person_to_images, random_seed + 1)
-    test_negative = generate_negative_pairs(len(test_positive), person_to_images, random_seed + 2)
-    print(f"  Train: {len(train_negative)} negative pairs")
-    print(f"  Val:   {len(val_negative)} negative pairs")
-    print(f"  Test:  {len(test_negative)} negative pairs")
+    
+    # Train & Val negatives come from the training people pool
+    train_negative = generate_negative_pairs(len(train_positive), person_to_images, train_people_list, random_seed)
+    val_negative = generate_negative_pairs(len(val_positive), person_to_images, train_people_list, random_seed + 1)
+    
+    # Test negatives MUST come from the test people pool
+    test_negative = generate_negative_pairs(len(test_positive), person_to_images, test_people_list, random_seed + 2)
+    
+    print(f"  Train: {len(train_negative)} negative pairs (from {len(train_people_list)} people)")
+    print(f"  Val:   {len(val_negative)} negative pairs (from {len(train_people_list)} people)")
+    print(f"  Test:  {len(test_negative)} negative pairs (from {len(test_people_list)} people)")
     print()
     
     # Combine positive and negative pairs
