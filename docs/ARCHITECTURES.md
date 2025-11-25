@@ -8,9 +8,11 @@ All architectures tested in the experiments.
 
 **What it is**: Pretrained MobileNetV3-Small from ImageNet with custom embedding head.
 
+**Image Input**: Single image per forward pass. During training with triplet loss, processes anchor, positive, and negative images separately in batch.
+
 **Architecture**:
 ```
-Input (3x105x105)
+Single Image Input (3x105x105)
     ↓
 MobileNetV3-Small Features (pretrained)
     ↓
@@ -26,7 +28,7 @@ BatchNorm1d(16)
     ↓
 L2 Normalize
     ↓
-16D Embedding
+16D Embedding (one per image)
 ```
 
 **Why it won**:
@@ -47,9 +49,11 @@ L2 Normalize
 
 **What it is**: Lightweight custom CNN built from scratch.
 
+**Image Input**: Single image per forward pass. During training with triplet loss, processes anchor, positive, and negative images separately in batch.
+
 **Architecture**:
 ```
-Input (3x105x105)
+Single Image Input (3x105x105)
     ↓
 Conv(3→32, 5x5) + ReLU + MaxPool
     ↓
@@ -65,7 +69,7 @@ Linear(512→16)
     ↓
 L2 Normalize
     ↓
-16D Embedding
+16D Embedding (one per image)
 ```
 
 **Why it's worse**:
@@ -85,27 +89,43 @@ L2 Normalize
 
 **What it is**: Classic Siamese architecture from Koch et al. (2015).
 
+**Image Input**: TWO images per forward pass (anchor + positive/negative pair). Both images pass through the SAME network with SHARED WEIGHTS.
+
 **Architecture**:
 ```
-Input (3x105x105)
-    ↓
-Conv(3→64, 10x10) + BN + ReLU + MaxPool
-    ↓
-Conv(64→128, 7x7) + BN + ReLU + MaxPool
-    ↓
-Conv(128→128, 4x4) + BN + ReLU + MaxPool
-    ↓
-Conv(128→256, 4x4) + BN + ReLU
-    ↓
-Flatten → 9216 features
-    ↓
-Linear(9216→4096) + BN
-    ↓
-L1 Distance between pairs
-    ↓
-Linear(4096→1) + Sigmoid
-    ↓
-Similarity Score (0-1)
+Image 1 (Anchor)              Image 2 (Positive/Negative)
+3x105x105                     3x105x105
+    ↓                             ↓
+    ├─────────────────────────────┤
+    │   SHARED WEIGHT NETWORK     │
+    │                             │
+    │  Conv(3→64, 10x10)          │
+    │  + BN + ReLU + MaxPool      │
+    │          ↓                  │
+    │  Conv(64→128, 7x7)          │
+    │  + BN + ReLU + MaxPool      │
+    │          ↓                  │
+    │  Conv(128→128, 4x4)         │
+    │  + BN + ReLU + MaxPool      │
+    │          ↓                  │
+    │  Conv(128→256, 4x4)         │
+    │  + BN + ReLU                │
+    │          ↓                  │
+    │  Flatten → 9216             │
+    │          ↓                  │
+    │  Linear(9216→4096) + BN     │
+    └─────────────────────────────┘
+         ↓                   ↓
+    Embedding 1         Embedding 2
+    (4096D)             (4096D)
+         ↓                   ↓
+         └─────────┬─────────┘
+                   ↓
+           L1 Distance
+                   ↓
+         Linear(4096→1) + Sigmoid
+                   ↓
+         Similarity Score (0-1)
 ```
 
 **Why it failed**:
@@ -126,27 +146,44 @@ Similarity Score (0-1)
 
 **What it is**: Lightweight version of Siamese Network.
 
+**Image Input**: TWO images per forward pass (anchor + positive/negative pair). Both images pass through the SAME network with SHARED WEIGHTS.
+
 **Architecture**:
 ```
-Input (3x105x105)
-    ↓
-Conv(3→32, 10x10) + BN + ReLU + MaxPool
-    ↓
-Conv(32→64, 7x7) + BN + ReLU + MaxPool
-    ↓
-Conv(64→64, 4x4) + BN + ReLU + MaxPool
-    ↓
-Conv(64→128, 4x4) + BN + ReLU
-    ↓
-Flatten → 4608 features
-    ↓
-Linear(4608→512) + BN + Dropout(0.3)
-    ↓
-L1 Distance between pairs
-    ↓
-Linear(512→1) + Sigmoid
-    ↓
-Similarity Score (0-1)
+Image 1 (Anchor)              Image 2 (Positive/Negative)
+3x105x105                     3x105x105
+    ↓                             ↓
+    ├─────────────────────────────┤
+    │   SHARED WEIGHT NETWORK     │
+    │                             │
+    │  Conv(3→32, 10x10)          │
+    │  + BN + ReLU + MaxPool      │
+    │          ↓                  │
+    │  Conv(32→64, 7x7)           │
+    │  + BN + ReLU + MaxPool      │
+    │          ↓                  │
+    │  Conv(64→64, 4x4)           │
+    │  + BN + ReLU + MaxPool      │
+    │          ↓                  │
+    │  Conv(64→128, 4x4)          │
+    │  + BN + ReLU                │
+    │          ↓                  │
+    │  Flatten → 4608             │
+    │          ↓                  │
+    │  Linear(4608→512)           │
+    │  + BN + Dropout(0.3)        │
+    └─────────────────────────────┘
+         ↓                   ↓
+    Embedding 1         Embedding 2
+    (512D)              (512D)
+         ↓                   ↓
+         └─────────┬─────────┘
+                   ↓
+           L1 Distance
+                   ↓
+         Linear(512→1) + Sigmoid
+                   ↓
+         Similarity Score (0-1)
 ```
 
 **Why it's better than Siamese but still bad**:
